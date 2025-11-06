@@ -12,40 +12,38 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-type richard_service struct{
+var channels = make(map[int64]chan Message)
+var approval = make(map[int64]chan bool)
 
+type Node struct {
+	proto.UnimplementedRichardServer
+	nodeId      int64
 	logicalTime int64
-	grpc *grpc.Server
+	grpc        *grpc.Server
+	
 }
 
+type Message struct {
+	timestamp int64
+	nodeId int64
+	
+}
 
 func main() {
-	server := &richard_service{
-		logicalTime: 0,
-	}
 
-	server.start_server()
 	
-	conn, err := grpc.NewClient("localhost:5050", grpc.WithTransportCredentials(insecure.NewCredentials()))
 
-	if err != nil {
-		log.Fatalf("Not working client 1")
-	}
-	log.Println("Client has connected to server")
-	currentUser, err := user.Current()
-	if err != nil {
-		log.Fatalf(err.Error())
-	}
+	for i := 1; i < 4; i++ {
+		go start_client(i)
 
-	client := proto.NewRichardClient(conn)
+	}
 
 }
 
-
-func (server *richard_service) start_server() {
+func (server *Node) start_server(noId int64) {
 	server.grpc = grpc.NewServer()
 	listener, err := net.Listen("tcp", ":5050")
-	
+
 	if err != nil {
 		log.Fatalf("Did not work 1")
 	}
@@ -62,15 +60,90 @@ func (server *richard_service) start_server() {
 
 }
 
-func (server *richard_service) send_request(ctx context.Context, in *proto.AskSend) (*proto.Empty, error) {
-	
-	
+func (server *Node) send_request(ctx context.Context, in *proto.AskSend) (*proto.Empty, error) {
 
+
+	Message := Message{
+		timestamp: in.TimeFormated,
+		nodeId: in.NodeId,
+	}
+
+	for key, value := range channels{
+		if (key != in.NodeId){
+			value <- Message
+		}
+	}
+
+	server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
+	log.Print(server.logicalTime, "-- current logical time")
 
 	return &proto.Empty{}, nil
 }
 
-func (server *richard_service) send_reply(ctx context.Context, in *proto.Proceed) (*proto.Empty, error) {
-	
+func (server *Node) send_reply(ctx context.Context, in *proto.Proceed) (*proto.Empty, error) {
+
 	return &proto.Empty{}, nil
+}
+
+func Critical_Section() {
+
+}
+
+func start_client(noId int64) {
+
+	channels[noId] = make(chan int)
+
+	server := &Node{
+		logicalTime: 0,
+	}
+
+	server.start_server(noId)
+
+	conn, err := grpc.NewClient("localhost:5050", grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+	if err != nil {
+		log.Fatalf("Not working client 1")
+	}
+	log.Println("Client", noId, "has connected to server")
+	if err != nil {
+		log.Fatalf(err.Error())
+	}
+
+
+	client := proto.NewRichardClient(conn)
+
+	go recieve(client, noId)
+
+	send(client, noId, 0)
+
+}
+
+func send(client proto.RichardClient, noId int64, logicaltime int64) {
+
+	send, err := client.SendRequest(context.Background(),
+		&proto.AskSend{
+			TimeFormated: 0,
+			NodeId:       noId,
+		},
+	)
+	if err != nil {
+		log.Fatalf("client not sending messages")
+	}
+
+	log.Println(send)
+
+	
+}
+
+func recieve(client proto.RichardClient, noId int64) {
+	for {
+		nodeMessage := <- channels[noId]
+		nodeIdRecieve := nodeMessage.nodeId
+		nodeTimeRecieve := nodeMessage.timestamp
+		
+
+
+		if()
+
+	}
 }
