@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+
+
+option go_package = "Richard/GRPC/proto";
+
+
+message Chits {
+    string chit = 1;
+    string author = 2;
+    int64 timeFormated = 3;
+}
+
+message Empty {}
+
+
+message joinRequest{
+    Author author = 1;
+    int64 time = 2;
+}
+
+message leave {
+    Author author = 1;
+    int64 time = 2;
+}
+
+message Author{
+    string id = 1;
+    string name = 2;
+}
+
+
+service richard {
+    rpc Send (Chits) returns (Empty) {};
+    rpc Recieve (joinRequest)  returns (stream Chits) {};
+}
