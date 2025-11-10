@@ -3,10 +3,13 @@ package main
 import (
 	proto "Richard/GRPC"
 	"context"
+	"fmt"
 	"log"
+	"math/rand/v2"
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -18,11 +21,7 @@ var channels = make(map[int]chan Message)
 // send approval
 var approval = make(map[int]chan Message)
 
-var Queues = make(map[int] []int)
-
-// int for making dif local hosts
-var serverId = 0
-var port = 0
+var Queues = make(map[int][]int)
 
 type Node struct {
 	proto.UnimplementedRichardServer
@@ -47,15 +46,16 @@ func main() {
 
 func (server *Node) start_server(noId int) {
 	server.grpc = grpc.NewServer()
-	serverId++
 	baseport := 5000
-	port = baseport + serverId
+	port := baseport + noId
 	serverName := ":" + strconv.Itoa(port)
 	listener, err := net.Listen("tcp", serverName)
 
 	if err != nil {
 		log.Fatalf("Did not work 1")
 	}
+
+	server.logicalTime = 0
 
 	log.Println("the server has started")
 
@@ -81,6 +81,8 @@ func start_client(noId int) {
 
 	server.start_server(noId)
 
+	port := 5000 + noId
+
 	clientServer := "localhost:" + strconv.Itoa(port)
 	conn, err := grpc.NewClient(clientServer, grpc.WithTransportCredentials(insecure.NewCredentials()))
 
@@ -92,11 +94,28 @@ func start_client(noId int) {
 		log.Fatalf(err.Error())
 	}
 
+	server.logicalTime++
+
 	client := proto.NewRichardClient(conn)
 
 	go recieveM(client, noId, int(server.logicalTime))
 
-	send(client, noId, 0)
+	for {
+
+		rng := rand.IntN(2)
+		if rng == 0 {
+			server.logicalTime ++
+			fmt.Println(noId, "is requesting access to Critical at logical time:", server.logicalTime)
+			
+			send(client, noId, int(server.logicalTime))
+			break
+		} else {
+			time.Sleep(5 * time.Second)
+		}
+
+	}
+
+	fmt.Println(noId, "has sent a message to critical.")
 
 }
 
@@ -130,7 +149,7 @@ func send(client proto.RichardClient, noId int, logicaltime int) {
 	if err != nil {
 		log.Fatalf("client not sending messages")
 	}
-	go recieveA(client, noId)
+	recieveA(client, noId, logicaltime)
 
 	log.Println(send)
 
@@ -138,12 +157,18 @@ func send(client proto.RichardClient, noId int, logicaltime int) {
 
 // send the approval to a node
 func (server *Node) send_reply(ctx context.Context, in *proto.Proceed) (*proto.Empty, error) {
+	Message := Message{
+		timestamp: 0,
+		nodeId:    in.NodeId,
+	}
+
+	approval[int(in.NodeId)] <- Message
 
 	return &proto.Empty{}, nil
 }
 
 // RECEIVE APPROVAL
-func recieveA(client proto.RichardClient, noId int) {
+func recieveA(client proto.RichardClient, noId int, timestamp int) {
 	var yes int
 	var mu sync.Mutex
 
@@ -158,8 +183,10 @@ func recieveA(client proto.RichardClient, noId int) {
 			mu.Lock()
 			Critical_Section(noId)
 			mu.Unlock()
+			timestamp++
 			yes = 0
-			Dequeue(client, noId, Queues[noId])
+			Dequeue(client, noId, Queues[noId], timestamp)
+			break
 		}
 	}
 }
@@ -172,13 +199,17 @@ func recieveM(client proto.RichardClient, noId int, timestamp int) {
 		nodeTimeRecieve := nodeMessage.timestamp
 
 		if nodeTimeRecieve < int64(timestamp) {
-			_, err := client.SendReply(context.Background())
+			_, err := client.SendReply(context.Background(), &proto.Proceed{
+			Proceed: true,
+			NodeId:       int64(noId),
+		},)
 			if err != nil {
 				log.Fatalf("client not sending messages")
 			}
 		} else {
-			Enqueue(int(nodeMessage.nodeId),  Queues[noId])
+			Enqueue(int(nodeMessage.nodeId), Queues[noId])
 		}
+		timestamp++
 	}
 }
 
@@ -190,7 +221,7 @@ func Enqueue(noId int, q []int) {
 	q = append(q, noId)
 }
 
-func Dequeue(client proto.RichardClient, noId int, q []int) {
+func Dequeue(client proto.RichardClient, noId int, q []int, timestamp int) {
 	if IsEmpty(q) {
 		return
 	}
@@ -205,6 +236,8 @@ func Dequeue(client proto.RichardClient, noId int, q []int) {
 		if err != nil {
 			log.Fatalf("client not sending reply")
 		}
+		timestamp++
+
 	}
 
 }
