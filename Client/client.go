@@ -105,12 +105,12 @@ func start_client(noId int) {
 		}
 		clients[i] = proto.NewRichardClient(conn)
 
-		log.Println("Client", noId, "has connected to server")
+		
 		if err != nil {
 			log.Fatalf(err.Error())
 		}
 	}
-
+	log.Println("Client", noId, "has connected to server")
 	server.logicalTime++
 
 	go recieveM(clients, noId, int(server.logicalTime), myRequestTimestamp)
@@ -122,7 +122,7 @@ func start_client(noId int) {
 			server.logicalTime++
 			fmt.Println(noId, "is requesting access to Critical at logical time:", server.logicalTime)
 			myRequestTimestamp = int(server.logicalTime)
-			send(clients, noId, int(server.logicalTime))
+			send(clients, noId, myRequestTimestamp)
 			break
 		} else {
 			time.Sleep(5 * time.Second)
@@ -146,8 +146,8 @@ func (server *Node) SendRequest(ctx context.Context, in *proto.AskSend) (*proto.
 			value <- Message
 		}
 	}
-	server.logicalTime = server.tick(server.logicalTime)
-	log.Print(server.logicalTime, "-- current logical time")
+	server.logicalTime = server.tick(in.TimeFormated)
+	log.Print(server.logicalTime, "-- current logical time... Request sent by", in.NodeId)
 
 	return &proto.Empty{}, nil
 }
@@ -178,7 +178,7 @@ func (server *Node) SendReply(ctx context.Context, in *proto.Proceed) (*proto.Em
 		timestamp: server.logicalTime,
 		nodeId:    in.NodeId,
 	}
-	log.Println(in.NodeId, "has approved the request")
+	log.Println(in.NodeId, "'s request has been approved by unknown client")
 	approval[int(in.NodeId)] <- Message
 
 	return &proto.Empty{}, nil
@@ -192,7 +192,7 @@ func recieveA(clients map[int]proto.RichardClient, noId int, timestamp int) {
 	for {
 		nodeMessage := <-approval[noId]
 
-		timestamp = max(timestamp, int(nodeMessage.timestamp))
+		timestamp = max(timestamp, int(nodeMessage.timestamp)) + 1
 		yes++
 		//this is to avoid the "declared and not used" error message
 		_ = nodeMessage
@@ -216,11 +216,11 @@ func recieveM(clients map[int]proto.RichardClient, noId int, timestamp int, loca
 	for {
 		nodeMessage := <-channels[noId]
 		fmt.Println(noId, "recieved request")
-		timestamp = max(timestamp, int(nodeMessage.timestamp))
+		timestamp = max(timestamp, int(nodeMessage.timestamp)) + 1
 
 		nodeTimeRecieve := nodeMessage.timestamp
 
-		if nodeTimeRecieve < int64(timestamp) || localTimestamp == -1 || (nodeMessage.timestamp == int64(localTimestamp) && nodeMessage.nodeId < int64(noId)) {
+		if nodeTimeRecieve < int64(localTimestamp) || localTimestamp == -1 || (nodeMessage.timestamp == int64(localTimestamp) && nodeMessage.nodeId < int64(noId)) {
 			client := clients[int(nodeMessage.nodeId)]
 			_, err := client.SendReply(context.Background(), &proto.Proceed{
 				Proceed: true,
