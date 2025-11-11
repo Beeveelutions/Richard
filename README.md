@@ -14,6 +14,9 @@ Run the client program from the Richard server with the command "go run Client/C
 
 You can either control C to end the program or the program will auto terminate after 5 minutes.
 
+Known Issues:
+
+A lot of the logs are repeating, but this is due to the fact that the processes are all running in a localhost with three go routines for each client. This means they are sharing the global variables so each client recieves two pings for each request making it so the nodes are basically answering twice on a request instead of once.
 
 # Logs
 
