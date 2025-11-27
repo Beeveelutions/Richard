@@ -10,7 +10,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
+	"bufio"
+	"os"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -23,47 +24,98 @@ var approval = make(map[int]chan Message)
 
 var Queues = make(map[int][]int)
 
-type Node struct {
-	proto.UnimplementedRichardServer
-	nodeId      int
-	logicalTime int64
 
-	grpc *grpc.Server
-}
 
 type Message struct {
 	timestamp int64
 	nodeId    int64
 }
 
-func main() {
-
-	for i := 1; i < 4; i++ {
-		go start_client(i)
-		fmt.Println("made client", i)
-	}
-
-	time.Sleep(5 * time.Minute)
+type Richard_service struct {
+	proto.UnimplementedRichardServer
+	error      chan error
+	grpc       *grpc.Server
+	serverPort string
+	highest    int
+	//first int is client id, second is highest bid that that client has made
+	
+	ports         []string
+	peers         map[string]proto.RichardClient //client pointing to other servers
+	listener      net.Listener
+	timeIsStarted bool
+	auctionOver   bool
+	nodeId      int
+	logicalTime int64
 }
 
-func (server *Node) start_server(noId int, ready chan<- bool) {
+func main() {
+ports := []string{
+		":5050",
+		":5051",
+		":5052",
+	}
+
+	server := &Richard_service{
+		highest:       0,
+		timeIsStarted: false,
+		auctionOver:   false,
+	}
+
+	log.Println("Enter the port of the server (A number from 0 to 2)")
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Scan()
+	Text := scanner.Text()
+
+	if Text == "0" || Text == "1" || Text == "2" {
+		port, _ := strconv.ParseInt(Text, 10, 64)
+		go server.start_server(ports[port], ports)
+		log.Println("Port selected: " + ports[port])
+		go start_client(ports[port])
+	} else {
+		log.Println("Enter the correct port of the server (A number from 0 to 2)")
+	}
+
+	
+
+	/*go server.start_server(":5050",ports)
+	go server.start_server(":5051",ports)
+	go server.start_server(":5052",ports)*/
+
+	select {}
+}
+
+func (server *Richard_service) start_server(numberPort string, ports []string) {
 	server.grpc = grpc.NewServer()
-	baseport := 5000
-	port := baseport + noId
-	serverName := ":" + strconv.Itoa(port)
-	listener, err := net.Listen("tcp", serverName)
+	
+	listener, err := net.Listen("tcp", numberPort)
 
 	if err != nil {
 		log.Fatalf("Did not work 1")
 	}
 
+
+	server.peers = make(map[string]proto.RichardClient)
+	server.listener = listener
 	server.logicalTime = 0
 
 	log.Println("the server has started")
+	server.ports = ports
 
+	for _, value := range server.ports {
+		if value != numberPort {
+			connection := "localhost" + value
+			conn, err := grpc.NewClient(connection, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if err != nil {
+				log.Fatalf("connection failed")
+			}
+
+			client := proto.NewRichardClient(conn)
+			server.peers[value] = client
+		}
+	}
 	
 	proto.RegisterRichardServer(server.grpc, server)
-	ready <- true
+
 	err = server.grpc.Serve(listener)
 
 	if err != nil {
@@ -72,23 +124,17 @@ func (server *Node) start_server(noId int, ready chan<- bool) {
 
 }
 
-func start_client(noId int) {
+func start_client(numberPort string) {
 	var q []int
-	channels[noId] = make(chan Message, 10)
-	approval[noId] = make(chan Message, 10)
+	
 	Queues[noId] = q
 	myRequestTimestamp := -1
-	ready := make(chan bool)
 
-	server := &Node{
+	server := &Richard_service{
 		logicalTime: 0,
 	}
 
-	fmt.Println("making server")
-
-	go server.start_server(noId, ready)
-
-	<-ready
+	
 
 	clients := make(map[int]proto.RichardClient)
 
@@ -134,7 +180,7 @@ func start_client(noId int) {
 
 }
 
-func (server *Node) SendRequest(ctx context.Context, in *proto.AskSend) (*proto.Empty, error) {
+func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSend) (*proto.Empty, error) {
 
 	Message := Message{
 		timestamp: in.TimeFormated,
@@ -173,7 +219,7 @@ func send(clients map[int]proto.RichardClient, noId int, logicaltime int) {
 }
 
 // send the approval to the node named in in.nodeId
-func (server *Node) SendReply(ctx context.Context, in *proto.Proceed) (*proto.Empty, error) {
+func (server *Richard_service) SendReply(ctx context.Context, in *proto.Proceed) (*proto.Empty, error) {
 	Message := Message{
 		timestamp: server.logicalTime,
 		nodeId:    in.NodeId,
@@ -279,7 +325,7 @@ func IsEmpty(q []int) bool {
 	return len(q) == 0
 }
 
-func (n *Node) tick(received int64) int64 {
+func (n *Richard_service) tick(received int64) int64 {
 	n.logicalTime = max(n.logicalTime, received) + 1
 	return n.logicalTime
 }
