@@ -27,7 +27,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type RichardClient interface {
-	SendRequest(ctx context.Context, in *AskSend, opts ...grpc.CallOption) (*Empty, error)
+	SendRequest(ctx context.Context, in *AskSend, opts ...grpc.CallOption) (*Proceed, error)
 	SendReply(ctx context.Context, in *Proceed, opts ...grpc.CallOption) (*Empty, error)
 }
 
@@ -39,9 +39,9 @@ func NewRichardClient(cc grpc.ClientConnInterface) RichardClient {
 	return &richardClient{cc}
 }
 
-func (c *richardClient) SendRequest(ctx context.Context, in *AskSend, opts ...grpc.CallOption) (*Empty, error) {
+func (c *richardClient) SendRequest(ctx context.Context, in *AskSend, opts ...grpc.CallOption) (*Proceed, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Empty)
+	out := new(Proceed)
 	err := c.cc.Invoke(ctx, Richard_SendRequest_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func (c *richardClient) SendReply(ctx context.Context, in *Proceed, opts ...grpc
 // All implementations must embed UnimplementedRichardServer
 // for forward compatibility.
 type RichardServer interface {
-	SendRequest(context.Context, *AskSend) (*Empty, error)
+	SendRequest(context.Context, *AskSend) (*Proceed, error)
 	SendReply(context.Context, *Proceed) (*Empty, error)
 	mustEmbedUnimplementedRichardServer()
 }
@@ -75,7 +75,7 @@ type RichardServer interface {
 // pointer dereference when methods are called.
 type UnimplementedRichardServer struct{}
 
-func (UnimplementedRichardServer) SendRequest(context.Context, *AskSend) (*Empty, error) {
+func (UnimplementedRichardServer) SendRequest(context.Context, *AskSend) (*Proceed, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendRequest not implemented")
 }
 func (UnimplementedRichardServer) SendReply(context.Context, *Proceed) (*Empty, error) {

@@ -111,7 +111,7 @@ func (*Empty) Descriptor() ([]byte, []int) {
 
 type Proceed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Proceed       bool                   `protobuf:"varint,1,opt,name=proceed,proto3" json:"proceed,omitempty"`
+	ProceedBool   bool                   `protobuf:"varint,1,opt,name=proceedBool,proto3" json:"proceedBool,omitempty"`
 	NodeId        int64                  `protobuf:"varint,2,opt,name=NodeId,proto3" json:"NodeId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -147,9 +147,9 @@ func (*Proceed) Descriptor() ([]byte, []int) {
 	return file_proto_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *Proceed) GetProceed() bool {
+func (x *Proceed) GetProceedBool() bool {
 	if x != nil {
-		return x.Proceed
+		return x.ProceedBool
 	}
 	return false
 }
@@ -169,12 +169,12 @@ const file_proto_proto_rawDesc = "" +
 	"\bask_send\x12\"\n" +
 	"\ftimeFormated\x18\x01 \x01(\x03R\ftimeFormated\x12\x16\n" +
 	"\x06NodeId\x18\x02 \x01(\x03R\x06NodeId\"\a\n" +
-	"\x05Empty\";\n" +
-	"\aproceed\x12\x18\n" +
-	"\aproceed\x18\x01 \x01(\bR\aproceed\x12\x16\n" +
-	"\x06NodeId\x18\x02 \x01(\x03R\x06NodeId2N\n" +
-	"\arichard\x12\"\n" +
-	"\vSendRequest\x12\t.ask_send\x1a\x06.Empty\"\x00\x12\x1f\n" +
+	"\x05Empty\"C\n" +
+	"\aproceed\x12 \n" +
+	"\vproceedBool\x18\x01 \x01(\bR\vproceedBool\x12\x16\n" +
+	"\x06NodeId\x18\x02 \x01(\x03R\x06NodeId2P\n" +
+	"\arichard\x12$\n" +
+	"\vSendRequest\x12\t.ask_send\x1a\b.proceed\"\x00\x12\x1f\n" +
 	"\tSendReply\x12\b.proceed\x1a\x06.Empty\"\x00B\x14Z\x12Richard/GRPC/protob\x06proto3"
 
 var (
@@ -198,7 +198,7 @@ var file_proto_proto_goTypes = []any{
 var file_proto_proto_depIdxs = []int32{
 	0, // 0: richard.SendRequest:input_type -> ask_send
 	2, // 1: richard.SendReply:input_type -> proceed
-	1, // 2: richard.SendRequest:output_type -> Empty
+	2, // 2: richard.SendRequest:output_type -> proceed
 	1, // 3: richard.SendReply:output_type -> Empty
 	2, // [2:4] is the sub-list for method output_type
 	0, // [0:2] is the sub-list for method input_type
