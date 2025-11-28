@@ -20,17 +20,11 @@ import (
 var Queues = make(map[int64][]int64)
 var approvalChannel map[int64]chan struct{}
 
-type Message struct {
-	timestamp int64
-	nodeId    int64
-}
+
 
 type Richard_service struct {
 	proto.UnimplementedRichardServer
-	error      chan error
 	grpc       *grpc.Server
-	serverPort string
-	highest    int
 	//first int is client id, second is highest bid that that client has made
 
 	ports             []string
@@ -38,7 +32,6 @@ type Richard_service struct {
 	listener          net.Listener
 	nodeId            int
 	logicalTime       int64
-	incriticalsection bool
 	requesttimestamp  int
 }
 
@@ -47,7 +40,7 @@ func main() {
 
 	ports := []string{
 		":5050",
-		":5051",
+		":5053",
 		":5052",
 	}
 
@@ -74,8 +67,8 @@ func main() {
 }
 
 func (server *Richard_service) start_server(numberPort string, ports []string, nodeId int) {
-	var q []int
-
+	var q []int64
+	server.nodeId = nodeId
 	Queues[int64(nodeId)] = q
 	server.grpc = grpc.NewServer()
 
@@ -108,9 +101,9 @@ func (server *Richard_service) start_server(numberPort string, ports []string, n
 	}
 
 	proto.RegisterRichardServer(server.grpc, server)
-	port, _ := strconv.ParseInt(numberPort, 10, 64)
+	
 
-	go crit_call(int(server.logicalTime), port, server.peers)
+	go crit_call(int(server.logicalTime), int64(nodeId), server.peers, server)
 
 	err = server.grpc.Serve(listener)
 
@@ -120,15 +113,16 @@ func (server *Richard_service) start_server(numberPort string, ports []string, n
 
 }
 
-func crit_call(logicalTime int, nodeId int64, peers map[string]proto.RichardClient) {
-	for {
+func crit_call(logicalTime int, nodeId int64, peers map[string]proto.RichardClient, server *Richard_service) {
+				time.Sleep(30 * time.Second)
 
+	for {
+		log.Println("Figuring out behaviour")
 		rng := rand.IntN(2)
 		if rng == 0 {
-			logicalTime++
+			server.logicalTime++
 			fmt.Println(nodeId, "is requesting access to Critical at logical time:", logicalTime)
-			myRequestTimestamp := int(logicalTime)
-			send(peers, nodeId, myRequestTimestamp)
+			send(peers, nodeId, server)
 		} else {
 			time.Sleep(5 * time.Second)
 		}
@@ -139,18 +133,19 @@ func crit_call(logicalTime int, nodeId int64, peers map[string]proto.RichardClie
 
 func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSend) (*proto.Proceed, error) {
 
-	fmt.Println(in.NodeId, "recieved request")
+	fmt.Println(in.NodeId, "has sent request")
 
 	nodeTimeRecieve := in.TimeFormated
+	amRequesting := server.requesttimestamp != -1
 
-	if nodeTimeRecieve < int64(server.logicalTime) || server.logicalTime == -1 || (in.TimeFormated == int64(server.logicalTime) && in.NodeId < int64(server.nodeId)) {
+
+	if !amRequesting || (nodeTimeRecieve < int64(server.logicalTime)) || (in.TimeFormated == int64(server.logicalTime) && in.NodeId < int64(server.nodeId)) {
 		log.Println(server.nodeId, "is sending approval to", in.NodeId)
-		log.Print(server.logicalTime, "-- current logical time... Request sent by", in.NodeId)
 
 		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
 
 		return &proto.Proceed{
-			Proceed: true,
+			ProceedBool: true,
 			NodeId:  int64(server.nodeId),
 		}, nil
 	} else {
@@ -161,19 +156,23 @@ func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSen
 		log.Println("Request has been queued")
 		Enqueue(server.nodeId, int(in.NodeId))
 		return &proto.Proceed{
-			Proceed: false,
+			ProceedBool: false,
 			NodeId:  int64(server.nodeId),
 		}, nil
 	}
 }
 
-func send(clients map[string]proto.RichardClient, noId int64, logicaltime int) {
+func send(clients map[string]proto.RichardClient, noId int64, server *Richard_service) {
 	var mu sync.Mutex
 	count := 0
 	for _, client := range clients {
+
+		server.logicalTime++
+		log.Print(server.logicalTime, "-- current logical time... Request sent by", noId)
+
 		send, err := client.SendRequest(context.Background(),
 			&proto.AskSend{
-				TimeFormated: int64(logicaltime),
+				TimeFormated: int64(server.logicalTime),
 				NodeId:       int64(noId),
 			},
 		)
@@ -181,37 +180,37 @@ func send(clients map[string]proto.RichardClient, noId int64, logicaltime int) {
 			log.Fatalf("client not sending messages")
 		}
 
-		if send.ProceedBool == true {
+		if send.ProceedBool {
 			count++
 		}
 
 	}
 
-	// Wait for remaining approvals from queued nodes
-	for count < len(clients) {
+	log.Println("Waiting for approval")
+
+	for count < len(server.peers) {
 		select {
-		case <-approvalChannel[noId]: // you need a channel per node
+		case <-approvalChannel[noId]: 
 			count++
 		}
 	}
+	log.Println("approved")
 
 	mu.Lock()
-	server.Critical_Section(noId)
+	Critical_Section(noId, server)
 	mu.Unlock()
 
 	count = 0
 }
 
-func (server *Richard_service) Critical_Section(noId int64) {
+func  Critical_Section(noId int64, server *Richard_service) {
 	// Enter critical section
-	server.incriticalsection = true
 	log.Println(server.nodeId, "entered critical section at logical time", server.logicalTime)
 
 	// Simulate CS work
 	time.Sleep(2 * time.Second)
 
 	// Leave critical section
-	server.incriticalsection = false
 	server.requesttimestamp = -1
 	log.Println(server.nodeId, "leaving critical section")
 
@@ -224,18 +223,35 @@ func leaveCriticalSection(server *Richard_service) {
 	Queues[int64(server.nodeId)] = []int64{}
 
 	for _, target := range q {
-		peer := server.peers[fmt.Sprintf(":%d", target)]
-		peer.SendReply(context.Background(), &proto.Proceed{
-			Proceed: true,
+		if target == 0{
+			peer := server.peers[":5050"]
+			peer.SendReply(context.Background(), &proto.Proceed{
+			ProceedBool: true,
 			NodeId:  int64(server.nodeId),
 		})
+		} else if target == 1 {
+			peer := server.peers[":5053"]
+			peer.SendReply(context.Background(), &proto.Proceed{
+			ProceedBool: true,
+			NodeId:  int64(server.nodeId),
+			})
+		} else {
+			peer := server.peers[":5052"]
+			peer.SendReply(context.Background(), &proto.Proceed{
+			ProceedBool: true,
+			NodeId:  int64(server.nodeId),
+			})
+		}
+		
 	}
+	server.requesttimestamp = 0
+	
 }
 
 func (server *Richard_service) SendReply(ctx context.Context, in *proto.Proceed) (*proto.Empty, error) {
 
-	if in.Proceed {
-		approvalChannel[int64(in.NodeId)] <- struct{}{}
+	if in.ProceedBool {
+		approvalChannel[int64(server.nodeId)] <- struct{}{}
 	}
 
 	return &proto.Empty{}, nil
@@ -258,7 +274,7 @@ func Dequeue(clients map[string]proto.RichardClient, noId int64, timestamp int) 
 		client := clients[string(target)]
 		_, err := client.SendReply(context.Background(),
 			&proto.Proceed{
-				Proceed: true,
+				ProceedBool: true,
 				NodeId:  int64(noId),
 			},
 		)
@@ -277,7 +293,4 @@ func IsEmpty(q []int) bool {
 	return len(q) == 0
 }
 
-func (n *Richard_service) tick(received int64) int64 {
-	n.logicalTime = max(n.logicalTime, received) + 1
-	return n.logicalTime
-}
+
