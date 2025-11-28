@@ -14,13 +14,13 @@ message Empty {}
 
 
 message proceed{
-    bool proceed = 1;
+    bool proceedBool = 1;
     int64 NodeId = 2;
 }
 
 
 
 service richard {
-    rpc SendRequest (ask_send) returns (Empty) {};
+    rpc SendRequest (ask_send) returns (proceed) {};
     rpc SendReply (proceed)  returns (Empty) {};
 }

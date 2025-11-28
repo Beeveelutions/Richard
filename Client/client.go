@@ -2,29 +2,23 @@ package main
 
 import (
 	proto "Richard/GRPC"
+	"bufio"
 	"context"
 	"fmt"
 	"log"
 	"math/rand/v2"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"time"
-	"bufio"
-	"os"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// send requests
-var channels = make(map[int]chan Message)
-
-// send approval
-var approval = make(map[int]chan Message)
-
-var Queues = make(map[int][]int)
-
-
+var Queues = make(map[int64][]int64)
+var approvalChannel map[int64]chan struct{}
 
 type Message struct {
 	timestamp int64
@@ -38,28 +32,26 @@ type Richard_service struct {
 	serverPort string
 	highest    int
 	//first int is client id, second is highest bid that that client has made
-	
-	ports         []string
-	peers         map[string]proto.RichardClient //client pointing to other servers
-	listener      net.Listener
-	timeIsStarted bool
-	auctionOver   bool
-	nodeId      int
-	logicalTime int64
+
+	ports             []string
+	peers             map[string]proto.RichardClient //client pointing to other servers
+	listener          net.Listener
+	nodeId            int
+	logicalTime       int64
+	incriticalsection bool
+	requesttimestamp  int
 }
 
 func main() {
-ports := []string{
+	approvalChannel = make(map[int64]chan struct{})
+
+	ports := []string{
 		":5050",
 		":5051",
 		":5052",
 	}
 
-	server := &Richard_service{
-		highest:       0,
-		timeIsStarted: false,
-		auctionOver:   false,
-	}
+	server := &Richard_service{}
 
 	log.Println("Enter the port of the server (A number from 0 to 2)")
 	scanner := bufio.NewScanner(os.Stdin)
@@ -68,14 +60,11 @@ ports := []string{
 
 	if Text == "0" || Text == "1" || Text == "2" {
 		port, _ := strconv.ParseInt(Text, 10, 64)
-		go server.start_server(ports[port], ports)
+		go server.start_server(ports[port], ports, int(port))
 		log.Println("Port selected: " + ports[port])
-		go start_client(ports[port])
 	} else {
 		log.Println("Enter the correct port of the server (A number from 0 to 2)")
 	}
-
-	
 
 	/*go server.start_server(":5050",ports)
 	go server.start_server(":5051",ports)
@@ -84,15 +73,19 @@ ports := []string{
 	select {}
 }
 
-func (server *Richard_service) start_server(numberPort string, ports []string) {
+func (server *Richard_service) start_server(numberPort string, ports []string, nodeId int) {
+	var q []int
+
+	Queues[int64(nodeId)] = q
 	server.grpc = grpc.NewServer()
-	
+
+	approvalChannel[int64(nodeId)] = make(chan struct{}, 10)
+
 	listener, err := net.Listen("tcp", numberPort)
 
 	if err != nil {
 		log.Fatalf("Did not work 1")
 	}
-
 
 	server.peers = make(map[string]proto.RichardClient)
 	server.listener = listener
@@ -113,8 +106,11 @@ func (server *Richard_service) start_server(numberPort string, ports []string) {
 			server.peers[value] = client
 		}
 	}
-	
+
 	proto.RegisterRichardServer(server.grpc, server)
+	port, _ := strconv.ParseInt(numberPort, 10, 64)
+
+	go crit_call(int(server.logicalTime), port, server.peers)
 
 	err = server.grpc.Serve(listener)
 
@@ -124,83 +120,58 @@ func (server *Richard_service) start_server(numberPort string, ports []string) {
 
 }
 
-func start_client(numberPort string) {
-	var q []int
-	
-	Queues[noId] = q
-	myRequestTimestamp := -1
-
-	server := &Richard_service{
-		logicalTime: 0,
-	}
-
-	
-
-	clients := make(map[int]proto.RichardClient)
-
-	for i := 1; i <= 3; i++ {
-		if i == noId {
-			continue
-		}
-		portNumber := 5000 + i
-		clientServer := "localhost:" + strconv.Itoa(portNumber)
-		conn, err := grpc.NewClient(clientServer, grpc.WithTransportCredentials(insecure.NewCredentials()))
-
-		if err != nil {
-			log.Fatalf("Not working client 1")
-		}
-		clients[i] = proto.NewRichardClient(conn)
-
-		
-		if err != nil {
-			log.Fatalf(err.Error())
-		}
-	}
-	log.Println("Client", noId, "has connected to server")
-	server.logicalTime++
-
-	go recieveM(clients, noId, int(server.logicalTime), myRequestTimestamp)
-
+func crit_call(logicalTime int, nodeId int64, peers map[string]proto.RichardClient) {
 	for {
 
 		rng := rand.IntN(2)
 		if rng == 0 {
-			server.logicalTime++
-			fmt.Println(noId, "is requesting access to Critical at logical time:", server.logicalTime)
-			myRequestTimestamp = int(server.logicalTime)
-			send(clients, noId, myRequestTimestamp)
-			break
+			logicalTime++
+			fmt.Println(nodeId, "is requesting access to Critical at logical time:", logicalTime)
+			myRequestTimestamp := int(logicalTime)
+			send(peers, nodeId, myRequestTimestamp)
 		} else {
 			time.Sleep(5 * time.Second)
 		}
 
 	}
 
-	fmt.Println(noId, "has sent a message to critical.")
-
 }
 
-func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSend) (*proto.Empty, error) {
+func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSend) (*proto.Proceed, error) {
 
-	Message := Message{
-		timestamp: in.TimeFormated,
-		nodeId:    in.NodeId,
+	fmt.Println(in.NodeId, "recieved request")
+
+	nodeTimeRecieve := in.TimeFormated
+
+	if nodeTimeRecieve < int64(server.logicalTime) || server.logicalTime == -1 || (in.TimeFormated == int64(server.logicalTime) && in.NodeId < int64(server.nodeId)) {
+		log.Println(server.nodeId, "is sending approval to", in.NodeId)
+		log.Print(server.logicalTime, "-- current logical time... Request sent by", in.NodeId)
+
+		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
+
+		return &proto.Proceed{
+			Proceed: true,
+			NodeId:  int64(server.nodeId),
+		}, nil
+	} else {
+		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
+
+		log.Print(server.logicalTime, "-- current logical time... Request sent by", in.NodeId)
+
+		log.Println("Request has been queued")
+		Enqueue(server.nodeId, int(in.NodeId))
+		return &proto.Proceed{
+			Proceed: false,
+			NodeId:  int64(server.nodeId),
+		}, nil
 	}
-
-	for key, value := range channels {
-		if key != int(in.NodeId) {
-			value <- Message
-		}
-	}
-	server.logicalTime = server.tick(in.TimeFormated)
-	log.Print(server.logicalTime, "-- current logical time... Request sent by", in.NodeId)
-
-	return &proto.Empty{}, nil
 }
 
-func send(clients map[int]proto.RichardClient, noId int, logicaltime int) {
+func send(clients map[string]proto.RichardClient, noId int64, logicaltime int) {
+	var mu sync.Mutex
+	count := 0
 	for _, client := range clients {
-		_, err := client.SendRequest(context.Background(),
+		send, err := client.SendRequest(context.Background(),
 			&proto.AskSend{
 				TimeFormated: int64(logicaltime),
 				NodeId:       int64(noId),
@@ -209,101 +180,82 @@ func send(clients map[int]proto.RichardClient, noId int, logicaltime int) {
 		if err != nil {
 			log.Fatalf("client not sending messages")
 		}
+
+		if send.ProceedBool == true {
+			count++
+		}
+
 	}
 
-	log.Println(noId, "has sent message to other clients")
+	// Wait for remaining approvals from queued nodes
+	for count < len(clients) {
+		select {
+		case <-approvalChannel[noId]: // you need a channel per node
+			count++
+		}
+	}
 
-	recieveA(clients, noId, logicaltime)
+	mu.Lock()
+	server.Critical_Section(noId)
+	mu.Unlock()
 
-
+	count = 0
 }
 
-// send the approval to the node named in in.nodeId
-func (server *Richard_service) SendReply(ctx context.Context, in *proto.Proceed) (*proto.Empty, error) {
-	Message := Message{
-		timestamp: server.logicalTime,
-		nodeId:    in.NodeId,
+func (server *Richard_service) Critical_Section(noId int64) {
+	// Enter critical section
+	server.incriticalsection = true
+	log.Println(server.nodeId, "entered critical section at logical time", server.logicalTime)
+
+	// Simulate CS work
+	time.Sleep(2 * time.Second)
+
+	// Leave critical section
+	server.incriticalsection = false
+	server.requesttimestamp = -1
+	log.Println(server.nodeId, "leaving critical section")
+
+	// Send approvals to queued requests
+	leaveCriticalSection(server)
+}
+
+func leaveCriticalSection(server *Richard_service) {
+	q := Queues[int64(server.nodeId)]
+	Queues[int64(server.nodeId)] = []int64{}
+
+	for _, target := range q {
+		peer := server.peers[fmt.Sprintf(":%d", target)]
+		peer.SendReply(context.Background(), &proto.Proceed{
+			Proceed: true,
+			NodeId:  int64(server.nodeId),
+		})
 	}
-	log.Println(in.NodeId, "'s request has been approved by unknown client")
-	approval[int(in.NodeId)] <- Message
+}
+
+func (server *Richard_service) SendReply(ctx context.Context, in *proto.Proceed) (*proto.Empty, error) {
+
+	if in.Proceed {
+		approvalChannel[int64(in.NodeId)] <- struct{}{}
+	}
 
 	return &proto.Empty{}, nil
 }
 
-// RECEIVE APPROVAL
-func recieveA(clients map[int]proto.RichardClient, noId int, timestamp int) {
-	var yes int
-	var mu sync.Mutex
-	fmt.Println(noId, " is waiting on approval")
-	for {
-		nodeMessage := <-approval[noId]
-
-		timestamp = max(timestamp, int(nodeMessage.timestamp)) + 1
-		yes++
-		//this is to avoid the "declared and not used" error message
-		_ = nodeMessage
-
-		//check if enough aprovals to access critical section
-		if yes == len(approval)-1 {
-			mu.Lock()
-			Critical_Section(noId)
-			mu.Unlock()
-			timestamp++
-			yes = 0
-			Dequeue(clients, noId, timestamp)
-			break
-		}
-	}
-}
-
-// receive mesages (request for approval from another client), this is also where we will decide if we want to send an approval to a another clients request
-func recieveM(clients map[int]proto.RichardClient, noId int, timestamp int, localTimestamp int) {
-
-	for {
-		nodeMessage := <-channels[noId]
-		fmt.Println(noId, "recieved request")
-		timestamp = max(timestamp, int(nodeMessage.timestamp)) + 1
-
-		nodeTimeRecieve := nodeMessage.timestamp
-
-		if nodeTimeRecieve < int64(localTimestamp) || localTimestamp == -1 || (nodeMessage.timestamp == int64(localTimestamp) && nodeMessage.nodeId < int64(noId)) {
-			client := clients[int(nodeMessage.nodeId)]
-			_, err := client.SendReply(context.Background(), &proto.Proceed{
-				Proceed: true,
-				NodeId:  int64(nodeMessage.nodeId),
-			})
-			if err != nil {
-				log.Fatalf("client not sending messages")
-			}
-			log.Println(noId, "is sending approval to", nodeMessage.nodeId)
-		} else {
-			log.Println("Request has been queued")
-			Enqueue(noId, int(nodeMessage.nodeId))
-
-		}
-
-	}
-}
-
-func Critical_Section(noId int) {
-	log.Println("I've accessed the critical section :)", noId)
-}
-
 func Enqueue(noId int, nodeId int) {
-	q := Queues[noId]
-	q = append(q, nodeId)
-	Queues[noId] = q
+	q := Queues[int64(noId)]
+	q = append(q, int64(nodeId))
+	Queues[int64(noId)] = q
 	fmt.Println("Request is in queue")
 }
 
-func Dequeue(clients map[int]proto.RichardClient, noId int, timestamp int) {
+func Dequeue(clients map[string]proto.RichardClient, noId int64, timestamp int) {
 	q := Queues[noId]
 
 	for len(q) > 0 {
 		target := q[0]
 		q = q[1:]
 
-		client := clients[target]
+		client := clients[string(target)]
 		_, err := client.SendReply(context.Background(),
 			&proto.Proceed{
 				Proceed: true,
