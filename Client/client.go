@@ -266,33 +266,5 @@ func Enqueue(noId int, nodeId int) {
 	fmt.Println("Request is in queue")
 }
 
-func Dequeue(clients map[string]proto.RichardClient, noId int64, timestamp int) {
-	q := Queues[noId]
-
-	for len(q) > 0 {
-		target := q[0]
-		q = q[1:]
-
-		client := clients[string(target)]
-		_, err := client.SendReply(context.Background(),
-			&proto.Proceed{
-				ProceedBool: true,
-				NodeId:  int64(noId),
-			},
-		)
-		if err != nil {
-			log.Fatalf("client not sending reply")
-		}
-		timestamp++
-		log.Println(noId, "is sending approval to", target)
-	}
-
-	Queues[noId] = q
-
-}
-
-func IsEmpty(q []int) bool {
-	return len(q) == 0
-}
 
 
