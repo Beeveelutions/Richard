@@ -136,10 +136,9 @@ func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSen
 	fmt.Println(in.NodeId, "has sent request")
 
 	nodeTimeRecieve := in.TimeFormated
-	amRequesting := server.requesttimestamp != -1
 
 
-	if !amRequesting || (nodeTimeRecieve < int64(server.logicalTime)) || (in.TimeFormated == int64(server.logicalTime) && in.NodeId < int64(server.nodeId)) {
+	if server.requesttimestamp != -1 || (nodeTimeRecieve < int64(server.logicalTime)) || (in.TimeFormated == int64(server.logicalTime) && in.NodeId < int64(server.nodeId)) {
 		log.Println(server.nodeId, "is sending approval to", in.NodeId)
 
 		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
@@ -215,6 +214,8 @@ func  Critical_Section(noId int64, server *Richard_service) {
 	log.Println(server.nodeId, "leaving critical section")
 
 	// Send approvals to queued requests
+	server.requesttimestamp = 0
+
 	leaveCriticalSection(server)
 }
 
@@ -244,7 +245,6 @@ func leaveCriticalSection(server *Richard_service) {
 		}
 		
 	}
-	server.requesttimestamp = 0
 	
 }
 
