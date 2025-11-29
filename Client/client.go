@@ -33,6 +33,7 @@ type Richard_service struct {
 	nodeId            int
 	logicalTime       int64
 	requesttimestamp  int
+	inCritical 		  bool
 }
 
 func main() {
@@ -71,6 +72,7 @@ func (server *Richard_service) start_server(numberPort string, ports []string, n
 	server.nodeId = nodeId
 	Queues[int64(nodeId)] = q
 	server.grpc = grpc.NewServer()
+	server.requesttimestamp = 0
 
 	approvalChannel[int64(nodeId)] = make(chan struct{}, 10)
 
@@ -121,7 +123,7 @@ func crit_call(logicalTime int, nodeId int64, peers map[string]proto.RichardClie
 		rng := rand.IntN(2)
 		if rng == 0 {
 			server.logicalTime++
-			fmt.Println(nodeId, "is requesting access to Critical at logical time:", logicalTime)
+			fmt.Println(nodeId, "is requesting access to Critical at logical time:", server.logicalTime)
 			send(peers, nodeId, server)
 		} else {
 			time.Sleep(5 * time.Second)
@@ -137,8 +139,7 @@ func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSen
 
 	nodeTimeRecieve := in.TimeFormated
 
-
-	if server.requesttimestamp != -1 || (nodeTimeRecieve < int64(server.logicalTime)) || (in.TimeFormated == int64(server.logicalTime) && in.NodeId < int64(server.nodeId)) {
+if !server.inCritical && (server.requesttimestamp == -1 ||  (nodeTimeRecieve < int64(server.logicalTime)) || (in.TimeFormated == int64(server.logicalTime) && in.NodeId < int64(server.nodeId))) {
 		log.Println(server.nodeId, "is sending approval to", in.NodeId)
 
 		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
@@ -150,7 +151,6 @@ func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSen
 	} else {
 		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
 
-		log.Print(server.logicalTime, "-- current logical time... Request sent by", in.NodeId)
 
 		log.Println("Request has been queued")
 		Enqueue(server.nodeId, int(in.NodeId))
@@ -163,6 +163,7 @@ func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSen
 
 func send(clients map[string]proto.RichardClient, noId int64, server *Richard_service) {
 	var mu sync.Mutex
+	server.requesttimestamp = -1
 	count := 0
 	for _, client := range clients {
 
@@ -203,6 +204,7 @@ func send(clients map[string]proto.RichardClient, noId int64, server *Richard_se
 }
 
 func  Critical_Section(noId int64, server *Richard_service) {
+	server.inCritical = true
 	// Enter critical section
 	log.Println(server.nodeId, "entered critical section at logical time", server.logicalTime)
 
@@ -210,11 +212,11 @@ func  Critical_Section(noId int64, server *Richard_service) {
 	time.Sleep(2 * time.Second)
 
 	// Leave critical section
-	server.requesttimestamp = -1
 	log.Println(server.nodeId, "leaving critical section")
 
 	// Send approvals to queued requests
 	server.requesttimestamp = 0
+	server.inCritical = false
 
 	leaveCriticalSection(server)
 }
