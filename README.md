@@ -18,5 +18,5 @@ Run the client 3 times and enter 0, 1 and 2 into the respective terminals. (Code
 
 
 # Logs
+<img width="1857" height="946" alt="image" src="https://github.com/user-attachments/assets/807b51c7-14fa-4000-ac98-c4a81709a3a8" />
 
-<img width="1559" height="957" alt="image" src="https://github.com/user-attachments/assets/7d9927cf-aedc-4b4f-abd3-cb4bcf954a1f" />
