@@ -144,24 +144,26 @@ func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSen
 		return &proto.Proceed{
 			ProceedBool: false,
 			NodeId:  int64(server.nodeId),
+			TimeFormated: server.logicalTime,
 		}, nil
 
 	}
-	if server.state == "WANTED" && (int64(server.logicalTime) < in.TimeFormated){
+	if server.state == "WANTED" && server.logicalTime < in.TimeFormated{
+		log.Println("Request has been queued because", server.nodeId, "is wanted and has smaller timestamp. the request timestamp is:", in.TimeFormated," the node reviewing has time of", server.logicalTime)
 		mu.Lock()
 		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
 		server.logicalTime++;
 		mu.Unlock()
-		log.Println("Request has been queued because", server.nodeId, "is wanted and has smaller timestamp")
 		muQ.Lock()
 		Enqueue(server.nodeId, int(in.NodeId))
 		muQ.Unlock()
 		return &proto.Proceed{
 			ProceedBool: false,
 			NodeId:  int64(server.nodeId),
+			TimeFormated: server.logicalTime,
 		}, nil
 	// if node is wanted and both timestamps are same, defer if node recieving message is smaller then node sending message
-	} else if server.state == "WANTED" && (int64(server.logicalTime) == in.TimeFormated) && (int64(server.nodeId) < in.NodeId)  {
+	} else if server.state == "WANTED" && server.logicalTime == in.TimeFormated && int64(server.nodeId) < in.NodeId  {
 		mu.Lock()
 		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
 		server.logicalTime++;
@@ -173,6 +175,7 @@ func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSen
 		return &proto.Proceed{
 			ProceedBool: false,
 			NodeId:  int64(server.nodeId),
+			TimeFormated: server.logicalTime,
 		}, nil
 	} else {
 		log.Println(server.nodeId, "is sending approval to", in.NodeId)
@@ -183,6 +186,7 @@ func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSen
 		return &proto.Proceed{
 			ProceedBool: true,
 			NodeId:  int64(server.nodeId),
+			TimeFormated: server.logicalTime,
 		}, nil
 	}
 
@@ -266,23 +270,29 @@ func leaveCriticalSection(server *Richard_service) {
 	muQ.Unlock()
 
 	for _, target := range q {
+		mu.Lock()
+		server.logicalTime++
+		mu.Unlock()
 		if target == 0{
 			peer := server.peers[":5050"]
 			peer.SendReply(context.Background(), &proto.Proceed{
 			ProceedBool: true,
 			NodeId:  int64(server.nodeId),
+			TimeFormated: server.logicalTime,
 		})
 		} else if target == 1 {
 			peer := server.peers[":5051"]
 			peer.SendReply(context.Background(), &proto.Proceed{
 			ProceedBool: true,
 			NodeId:  int64(server.nodeId),
+			TimeFormated: server.logicalTime,
 			})
 		} else {
 			peer := server.peers[":5052"]
 			peer.SendReply(context.Background(), &proto.Proceed{
 			ProceedBool: true,
 			NodeId:  int64(server.nodeId),
+			TimeFormated: server.logicalTime,
 			})
 		}
 		
@@ -292,6 +302,10 @@ func leaveCriticalSection(server *Richard_service) {
 
 func (server *Richard_service) SendReply(ctx context.Context, in *proto.Proceed) (*proto.Empty, error) {
 	// send approval into the nodes approval channel to unlock the node
+	mu.Lock()
+	server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
+	mu.Unlock()
+
 	approvalChannel <- 1
 	return &proto.Empty{}, nil
 }
