@@ -14,7 +14,7 @@ Run the client program from the Richard server with the command "go run Client/C
 
 You can either control C to end the program.
 
-Run the client 3 times and enter 0, 1 and 2 into the respective terminals. (Code will not work if there isnt three clients present)
+Run the client 3 times and enter 0, 1 and 2 into the respective terminals. (Code will not work if there isnt three clients present) This has to be done within 30 seconds of starting the first client, else there will be an error.
 
 
 # Logs
