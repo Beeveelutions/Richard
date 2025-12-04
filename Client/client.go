@@ -18,7 +18,7 @@ import (
 )
 
 var Queues = make(map[int64][]int64)
-var approvalChannel map[int64]chan struct{}
+var approvalChannel chan int64
 
 var mu sync.Mutex
 var muState sync.Mutex
@@ -38,11 +38,10 @@ type Richard_service struct {
 }
 
 func main() {
-	approvalChannel = make(map[int64]chan struct{})
 
 	ports := []string{
 		":5050",
-		":5053",
+		":5051",
 		":5052",
 	}
 
@@ -61,10 +60,6 @@ func main() {
 		log.Println("Enter the correct port of the server (A number from 0 to 2)")
 	}
 
-	/*go server.start_server(":5050",ports)
-	go server.start_server(":5051",ports)
-	go server.start_server(":5052",ports)*/
-
 	select {}
 }
 
@@ -74,7 +69,7 @@ func (server *Richard_service) start_server(numberPort string, ports []string, n
 	Queues[int64(nodeId)] = q
 	server.grpc = grpc.NewServer()
 
-	approvalChannel[int64(nodeId)] = make(chan struct{}, 10)
+	approvalChannel = make(chan int64)
 
 	listener, err := net.Listen("tcp", numberPort)
 
@@ -193,6 +188,7 @@ func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSen
 
 }
 
+//this is where a node sends a request to other nodes
 func send(clients map[string]proto.RichardClient, noId int64, server *Richard_service) {
 	//node is requesting thus setting state to Wanted
 	muState.Lock()
@@ -226,9 +222,10 @@ func send(clients map[string]proto.RichardClient, noId int64, server *Richard_se
 
 	log.Println("Waiting for approval")
 
+	//Waits for approval (if didn't get approval from all (and was therefore set in a queue))
 	for count < len(server.peers) {
 		select {
-		case <-approvalChannel[noId]: 
+		case <-approvalChannel: 
 			count++
 		}
 	}
@@ -258,6 +255,7 @@ func  Critical_Section(noId int64, server *Richard_service) {
 	server.state = "FREE"
 	muState.Unlock()
 
+	//will now dequeue and send approval to all requests in the queue
 	leaveCriticalSection(server)
 }
 
@@ -275,7 +273,7 @@ func leaveCriticalSection(server *Richard_service) {
 			NodeId:  int64(server.nodeId),
 		})
 		} else if target == 1 {
-			peer := server.peers[":5053"]
+			peer := server.peers[":5051"]
 			peer.SendReply(context.Background(), &proto.Proceed{
 			ProceedBool: true,
 			NodeId:  int64(server.nodeId),
@@ -293,14 +291,12 @@ func leaveCriticalSection(server *Richard_service) {
 }
 
 func (server *Richard_service) SendReply(ctx context.Context, in *proto.Proceed) (*proto.Empty, error) {
-
-	if in.ProceedBool {
-		approvalChannel[int64(server.nodeId)] <- struct{}{}
-	}
-
+	// send approval into the nodes approval channel to unlock the node
+	approvalChannel <- 1
 	return &proto.Empty{}, nil
 }
 
+//queues in the node
 func Enqueue(noId int, nodeId int) {
 	q := Queues[int64(noId)]
 	q = append(q, int64(nodeId))
