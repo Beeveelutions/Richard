@@ -73,7 +73,6 @@ func (server *Richard_service) start_server(numberPort string, ports []string, n
 	server.nodeId = nodeId
 	Queues[int64(nodeId)] = q
 	server.grpc = grpc.NewServer()
-	server.requesttimestamp = 0
 
 	approvalChannel[int64(nodeId)] = make(chan struct{}, 10)
 
@@ -167,7 +166,7 @@ func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSen
 			NodeId:  int64(server.nodeId),
 		}, nil
 	// if node is wanted and both timestamps are same, defer if node recieving message is smaller then node sending message
-	} else if server.state == "WANTED" && (int64(server.logicalTime) == in.TimeFormated) && (int64(server.nodeId) < in.nodeId)  {
+	} else if server.state == "WANTED" && (int64(server.logicalTime) == in.TimeFormated) && (int64(server.nodeId) < in.NodeId)  {
 		mu.Lock()
 		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
 		server.logicalTime++;
@@ -204,7 +203,7 @@ func send(clients map[string]proto.RichardClient, noId int64, server *Richard_se
 		mu.Lock()
 		server.logicalTime++
 		mu.Unlock()
-		fmt.Println(nodeId, "is requesting access to Critical at logical time:", server.logicalTime)
+		fmt.Println(noId, "is requesting access to Critical at logical time:", server.logicalTime)
 		send, err := client.SendRequest(context.Background(),
 			&proto.AskSend{
 				TimeFormated: int64(server.logicalTime),
