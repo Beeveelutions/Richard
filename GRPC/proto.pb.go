@@ -113,6 +113,7 @@ type Proceed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ProceedBool   bool                   `protobuf:"varint,1,opt,name=proceedBool,proto3" json:"proceedBool,omitempty"`
 	NodeId        int64                  `protobuf:"varint,2,opt,name=NodeId,proto3" json:"NodeId,omitempty"`
+	TimeFormated  int64                  `protobuf:"varint,3,opt,name=timeFormated,proto3" json:"timeFormated,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -161,6 +162,13 @@ func (x *Proceed) GetNodeId() int64 {
 	return 0
 }
 
+func (x *Proceed) GetTimeFormated() int64 {
+	if x != nil {
+		return x.TimeFormated
+	}
+	return 0
+}
+
 var File_proto_proto protoreflect.FileDescriptor
 
 const file_proto_proto_rawDesc = "" +
@@ -169,10 +177,11 @@ const file_proto_proto_rawDesc = "" +
 	"\bask_send\x12\"\n" +
 	"\ftimeFormated\x18\x01 \x01(\x03R\ftimeFormated\x12\x16\n" +
 	"\x06NodeId\x18\x02 \x01(\x03R\x06NodeId\"\a\n" +
-	"\x05Empty\"C\n" +
+	"\x05Empty\"g\n" +
 	"\aproceed\x12 \n" +
 	"\vproceedBool\x18\x01 \x01(\bR\vproceedBool\x12\x16\n" +
-	"\x06NodeId\x18\x02 \x01(\x03R\x06NodeId2P\n" +
+	"\x06NodeId\x18\x02 \x01(\x03R\x06NodeId\x12\"\n" +
+	"\ftimeFormated\x18\x03 \x01(\x03R\ftimeFormated2P\n" +
 	"\arichard\x12$\n" +
 	"\vSendRequest\x12\t.ask_send\x1a\b.proceed\"\x00\x12\x1f\n" +
 	"\tSendReply\x12\b.proceed\x1a\x06.Empty\"\x00B\x14Z\x12Richard/GRPC/protob\x06proto3"

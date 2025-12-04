@@ -20,7 +20,9 @@ import (
 var Queues = make(map[int64][]int64)
 var approvalChannel map[int64]chan struct{}
 
-
+var mu sync.Mutex
+var muState sync.Mutex
+var muQ sync.Mutex
 
 type Richard_service struct {
 	proto.UnimplementedRichardServer
@@ -32,8 +34,7 @@ type Richard_service struct {
 	listener          net.Listener
 	nodeId            int
 	logicalTime       int64
-	requesttimestamp  int
-	inCritical 		  bool
+	state			  string
 }
 
 func main() {
@@ -85,6 +86,7 @@ func (server *Richard_service) start_server(numberPort string, ports []string, n
 	server.peers = make(map[string]proto.RichardClient)
 	server.listener = listener
 	server.logicalTime = 0
+	server.state = "FREE"
 
 	log.Println("the server has started")
 	server.ports = ports
@@ -122,8 +124,6 @@ func crit_call(logicalTime int, nodeId int64, peers map[string]proto.RichardClie
 		log.Println("Figuring out behaviour")
 		rng := rand.IntN(2)
 		if rng == 0 {
-			server.logicalTime++
-			fmt.Println(nodeId, "is requesting access to Critical at logical time:", server.logicalTime)
 			send(peers, nodeId, server)
 		} else {
 			time.Sleep(5 * time.Second)
@@ -137,39 +137,74 @@ func (server *Richard_service) SendRequest(ctx context.Context, in *proto.AskSen
 
 	fmt.Println(in.NodeId, "has sent request")
 
-	nodeTimeRecieve := in.TimeFormated
-
-if !server.inCritical && (server.requesttimestamp == -1 ||  (nodeTimeRecieve < int64(server.logicalTime)) || (in.TimeFormated == int64(server.logicalTime) && in.NodeId < int64(server.nodeId))) {
-		log.Println(server.nodeId, "is sending approval to", in.NodeId)
-
+	if server.state == "HELD" {
+		//Increment logical time two times because one is for receiving the message, and the second one is for replying to the message
+		mu.Lock()
 		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
-
-		return &proto.Proceed{
-			ProceedBool: true,
-			NodeId:  int64(server.nodeId),
-		}, nil
-	} else {
-		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
-
-
-		log.Println("Request has been queued")
+		server.logicalTime++;
+		mu.Unlock()
+		log.Println("Request has been queued because", server.nodeId, "is in critical")
+		muQ.Lock()
 		Enqueue(server.nodeId, int(in.NodeId))
+		muQ.Unlock()
 		return &proto.Proceed{
 			ProceedBool: false,
 			NodeId:  int64(server.nodeId),
 		}, nil
+
 	}
+	if server.state == "WANTED" && (int64(server.logicalTime) < in.TimeFormated){
+		mu.Lock()
+		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
+		server.logicalTime++;
+		mu.Unlock()
+		log.Println("Request has been queued because", server.nodeId, "is wanted and has smaller timestamp")
+		muQ.Lock()
+		Enqueue(server.nodeId, int(in.NodeId))
+		muQ.Unlock()
+		return &proto.Proceed{
+			ProceedBool: false,
+			NodeId:  int64(server.nodeId),
+		}, nil
+	// if node is wanted and both timestamps are same, defer if node recieving message is smaller then node sending message
+	} else if server.state == "WANTED" && (int64(server.logicalTime) == in.TimeFormated) && (int64(server.nodeId) < in.nodeId)  {
+		mu.Lock()
+		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
+		server.logicalTime++;
+		mu.Unlock()
+		log.Println("Request has been queued because", server.nodeId, "is wanted and has smaller nodeid due to having same timestamp")
+		muQ.Lock()
+		Enqueue(server.nodeId, int(in.NodeId))
+		muQ.Unlock()
+		return &proto.Proceed{
+			ProceedBool: false,
+			NodeId:  int64(server.nodeId),
+		}, nil
+	} else {
+		log.Println(server.nodeId, "is sending approval to", in.NodeId)
+		mu.Lock()
+		server.logicalTime = max(server.logicalTime, in.TimeFormated) + 1
+		server.logicalTime++;
+		mu.Unlock()
+		return &proto.Proceed{
+			ProceedBool: true,
+			NodeId:  int64(server.nodeId),
+		}, nil
+	}
+
 }
 
 func send(clients map[string]proto.RichardClient, noId int64, server *Richard_service) {
-	var mu sync.Mutex
-	server.requesttimestamp = -1
+	//node is requesting thus setting state to Wanted
+	muState.Lock()
+	server.state = "WANTED"
+	muState.Unlock()
 	count := 0
 	for _, client := range clients {
-
+		mu.Lock()
 		server.logicalTime++
-		log.Print(server.logicalTime, "-- current logical time... Request sent by", noId)
-
+		mu.Unlock()
+		fmt.Println(nodeId, "is requesting access to Critical at logical time:", server.logicalTime)
 		send, err := client.SendRequest(context.Background(),
 			&proto.AskSend{
 				TimeFormated: int64(server.logicalTime),
@@ -183,6 +218,10 @@ func send(clients map[string]proto.RichardClient, noId int64, server *Richard_se
 		if send.ProceedBool {
 			count++
 		}
+		mu.Lock()
+		server.logicalTime = max(server.logicalTime, send.TimeFormated) + 1
+		mu.Unlock()
+
 
 	}
 
@@ -196,15 +235,16 @@ func send(clients map[string]proto.RichardClient, noId int64, server *Richard_se
 	}
 	log.Println("approved")
 
-	mu.Lock()
 	Critical_Section(noId, server)
-	mu.Unlock()
 
 	count = 0
 }
 
 func  Critical_Section(noId int64, server *Richard_service) {
-	server.inCritical = true
+	//Node is in critical thus state is Held
+	muState.Lock()
+	server.state = "HELD"
+	muState.Unlock()
 	// Enter critical section
 	log.Println(server.nodeId, "entered critical section at logical time", server.logicalTime)
 
@@ -214,16 +254,19 @@ func  Critical_Section(noId int64, server *Richard_service) {
 	// Leave critical section
 	log.Println(server.nodeId, "leaving critical section")
 
-	// Send approvals to queued requests
-	server.requesttimestamp = 0
-	server.inCritical = false
+	// State til free
+	muState.Lock()
+	server.state = "FREE"
+	muState.Unlock()
 
 	leaveCriticalSection(server)
 }
 
 func leaveCriticalSection(server *Richard_service) {
+	muQ.Lock()
 	q := Queues[int64(server.nodeId)]
 	Queues[int64(server.nodeId)] = []int64{}
+	muQ.Unlock()
 
 	for _, target := range q {
 		if target == 0{
