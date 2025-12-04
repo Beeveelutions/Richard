@@ -27,8 +27,6 @@ var muQ sync.Mutex
 type Richard_service struct {
 	proto.UnimplementedRichardServer
 	grpc       *grpc.Server
-	//first int is client id, second is highest bid that that client has made
-
 	ports             []string
 	peers             map[string]proto.RichardClient //client pointing to other servers
 	listener          net.Listener
@@ -101,7 +99,7 @@ func (server *Richard_service) start_server(numberPort string, ports []string, n
 	proto.RegisterRichardServer(server.grpc, server)
 	
 
-	go crit_call(int(server.logicalTime), int64(nodeId), server.peers, server)
+	go crit_call(int64(nodeId), server.peers, server)
 
 	err = server.grpc.Serve(listener)
 
@@ -111,7 +109,8 @@ func (server *Richard_service) start_server(numberPort string, ports []string, n
 
 }
 
-func crit_call(logicalTime int, nodeId int64, peers map[string]proto.RichardClient, server *Richard_service) {
+//this is where the behaviour of the node is chosen
+func crit_call( nodeId int64, peers map[string]proto.RichardClient, server *Richard_service) {
 				time.Sleep(30 * time.Second)
 
 	for {
